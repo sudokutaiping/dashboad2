@@ -1,26 +1,156 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My App</title>
-    <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
-        iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-    </style>
-</head>
-<body>
-    <iframe src="https://script.google.com/macros/s/AKfycbwCOI0AJVHIfcgJMlqsie6Hu_r2Dbc7xJMgHWklRRUtKxE838cZ1ejZYRavSMx6h1w/exec"></iframe>
-</body>
-</html>
- 
+/**
+ * -------------------------------------------------------------
+ * SISTEM SCOREKEEPER SUDOKU LMS 2026 - KOD BACKEND API (Code.gs)
+ * -------------------------------------------------------------
+ * Versi ini dikemaskini untuk bertindak sebagai API Latar Belakang (CORS-enabled)
+ * bagi menyokong reka bentuk antaramuka hos luaran seperti GitHub Pages tanpa iframe.
+ * 
+ * Sila pastikan anda menukar tetapan deployment kepada:
+ * Execute as: "Me"
+ * Who has access: "Anyone"
+ */
+
+const DATA_FILE_NAME = "SUDOKU_LMS_2026_DRIVE_DATA.json";
+const USERS_FILE_NAME = "SUDOKU_LMS_2026_USERS.json";
+
+const DEFAULT_USERS = {
+  "6077": "KETUA HAKIM",
+  "0000": "WONG SOON LEONG",
+  "1111": "HAKIM 1",
+  "2222": "HAKIM 2"
+};
+
+/**
+ * Sekatan keselamatan: Menghalang paparan terus jika dibuka melalui url Google.
+ * Memaksa pengguna menggunakan domain GitHub Pages anda.
+ */
+function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({ 
+    status: "error", 
+    message: "Akses terus tidak dibenarkan. Sila gunakan laman rasmi dashboard GitHub Pages anda." 
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Menerima segala operasi rangkaian (Fetch API) secara senyap dari GitHub Pages.
+ */
+function doPost(e) {
+  let result;
+  try {
+    // Membaca parameter data JSON yang dihantar oleh GitHub
+    const requestData = JSON.parse(e.postData.contents);
+    const action = requestData.action;
+
+    if (action === "checkLogin") {
+      result = checkLogin(requestData.password);
+    } else if (action === "saveScoreData") {
+      result = saveScoreData(requestData.schoolsArray, requestData.editorName);
+    } else if (action === "getScoreData") {
+      result = getScoreData();
+    } else if (action === "saveUserData") {
+      result = saveUserData(requestData.updatedUsersList, requestData.editorName);
+    } else {
+      result = { status: "error", message: "Tindakan API (Action) tidak sah!" };
+    }
+  } catch (error) {
+    result = { status: "error", message: "Ralat pemprosesan pelayan: " + error.toString() };
+  }
+
+  // Mengembalikan output JSON bersih bersama kebenaran akses silang (CORS) yang diperlukan oleh pelayar
+  return ContentService.createTextOutput(JSON.stringify(result))
+                       .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getOrCreateFile(fileName, defaultContent) {
+  const files = DriveApp.getFilesByName(fileName);
+  if (files.hasNext()) {
+    return files.next();
+  } else {
+    return DriveApp.createFile(fileName, defaultContent, MimeType.PLAIN_TEXT);
+  }
+}
+
+function checkLogin(password) {
+  try {
+    const usersFile = getOrCreateFile(USERS_FILE_NAME, JSON.stringify(DEFAULT_USERS));
+    const usersList = JSON.parse(usersFile.getBlob().getDataAsString());
+    
+    if (usersList.hasOwnProperty(password)) {
+      const username = usersList[password];
+      const dataFile = getOrCreateFile(DATA_FILE_NAME, JSON.stringify({ schools: [], lastEditTime: "", lastEditBy: "" }));
+      const scoreData = JSON.parse(dataFile.getBlob().getDataAsString());
+      
+      return {
+        status: "success",
+        username: username,
+        schools: scoreData.schools || [],
+        lastEditTime: scoreData.lastEditTime || "",
+        lastEditBy: scoreData.lastEditBy || "",
+        usersList: (username === "KETUA HAKIM" ? usersList : null)
+      };
+    } else {
+      return { status: "error", message: "Kata laluan salah! Sila cuba lagi." };
+    }
+  } catch (error) {
+    return { status: "error", message: "Ralat Sistem Pelayan: " + error.toString() };
+  }
+}
+
+function saveScoreData(schoolsArray, editorName) {
+  try {
+    const file = getOrCreateFile(DATA_FILE_NAME, JSON.stringify({ schools: [], lastEditTime: "", lastEditBy: "" }));
+    const timestamp = new Date().toISOString();
+    const updater = editorName ? editorName : "Sistem";
+    
+    const payload = {
+      schools: schoolsArray,
+      lastEditTime: timestamp,
+      lastEditBy: updater
+    };
+    
+    file.setContent(JSON.stringify(payload, null, 2));
+    
+    return {
+      status: "success",
+      lastEditTime: timestamp,
+      lastEditBy: updater
+    };
+  } catch (error) {
+    return { status: "error", message: "Gagal menyimpan data ke Drive: " + error.toString() };
+  }
+}
+
+function getScoreData() {
+  try {
+    const file = getOrCreateFile(DATA_FILE_NAME, JSON.stringify({ schools: [], lastEditTime: "", lastEditBy: "" }));
+    const scoreData = JSON.parse(file.getBlob().getDataAsString());
+    return {
+      status: "success",
+      schools: scoreData.schools || [],
+      lastEditTime: scoreData.lastEditTime || "",
+      lastEditBy: scoreData.lastEditBy || ""
+    };
+  } catch (error) {
+    return { status: "error", schools: [], message: error.toString() };
+  }
+}
+
+function saveUserData(updatedUsersList, editorName) {
+  try {
+    if (editorName !== "KETUA HAKIM") {
+      return { status: "error", message: "Akses Ditolak: Anda tiada kebenaran untuk menguruskan akaun." };
+    }
+    
+    const file = getOrCreateFile(USERS_FILE_NAME, JSON.stringify(DEFAULT_USERS));
+    
+    if (!updatedUsersList.hasOwnProperty("6077") || updatedUsersList["6077"] !== "KETUA HAKIM") {
+      updatedUsersList["6077"] = "KETUA HAKIM";
+    }
+    
+    file.setContent(JSON.stringify(updatedUsersList, null, 2));
+    
+    return { status: "success", usersList: updatedUsersList };
+  } catch (error) {
+    return { status: "error", message: "Gagal mengemas kini senarai pengguna: " + error.toString() };
+  }
+}
